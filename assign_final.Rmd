@@ -1,0 +1,143 @@
+---
+title: "Machine learning Assignment"
+author: "Abhay"
+date: "Sunday, August 23, 2015"
+output: html_document
+---
+
+##Executive Summary
+
+This Machine learning Assignment we try to build a ML model to predict the manner in which subjecs did the exercise. We encomplish this using training dataset and then predict on the test dataset. The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+##Dataprocessing
+
+Loading the data  
+```{r 1Dataload, cache=TRUE ,echo=TRUE}
+url_train <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_test  <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+filepath1<- "./pml-training.csv"
+filepath2<- "./pml-testing.csv"
+if(!file.exists(filepath1)){
+        message("Downloading Training file ....")
+        download.file(url = url_train,destfile = "./pml-training.csv",mode="wb")
+} else{
+        print("Training file already downloaded")
+}
+if(!file.exists(filepath2)){
+        message("Downloading Test file ....")
+        download.file(url = url_test,destfile = "./pml-testing.csv",mode="wb")
+} else{
+        print("Testing file already downloaded")
+}
+#load data
+training <- read.csv("./pml-training.csv")
+testing  <- read.csv("./pml-testing.csv")
+
+```
+
+Convert incorrectly code factor variables back to int:  for Training data
+```{r 1dataprocessing_train, cache=TRUE, echo=TRUE,warning=FALSE}
+library(lubridate)
+#fetch indices of all factor vars
+factvars <-which(sapply(training[1,],FUN = function(x) is.factor(x))) 
+factvars_final <- factvars[c(1,2,3,37)] #list genuine factors
+factToint_list <- factvars[-c(1,2,3,37)] #remove genuine factors
+#convert factors to numeric, non numeric val will be converted to NA which is fine.
+train <- training ;
+for(i in 1:dim(train)[2]){
+        if(i %in% factToint_list){ 
+                #convert factor to num
+                train[,i] <- as.numeric(as.character(training[,i]))
+        } else if(i == 5){
+                #convert factor var to datetime var
+                train[,i] <- dmy_hm(training[,i])
+        }else{
+                train[,i] <- training[,i]
+        }
+}
+#break datatime variable
+train$yr  <- year(train[,5])
+train$day <- day(train[,5])
+train$mon <- month(train[,5])
+train$hr  <- hour(train[,5])
+train$mm  <- minute(train[,5])  
+```
+
+Convert incorrectly code factor variables back to int:  for testing data  
+```{r 1dataprocessing_test, cache=TRUE, echo=TRUE}
+tt <- sapply(testing[1,],FUN = function(x) is.factor(x)) 
+factvars <-which(tt) #fetch indices of all factor vars
+factvars_final_Test <- factvars #list genuine factors
+tt <- sapply(testing[1,],FUN = function(x) is.logical(x)) 
+logivars <-which(tt) #fetch indices of all logical vars
+test <- testing
+for(i in 1:dim(test)[2]){
+        if(i %in% logivars){
+                test[,i] <- as.numeric(as.character(testing[,i]))
+        } else if(i == 5){
+                #convert factor var to datetime var
+                test[,i] <- dmy_hm(testing[,i])
+        }else{
+                test[,i] <- testing[,i]
+        }
+}
+#break datatime variable
+test$yr  <- year(test[,5])
+test$day <- day(test[,5])
+test$mon <- month(test[,5])
+test$hr  <- hour(test[,5])
+test$mm  <- minute(test[,5])
+#check is dataset have same name
+sum(names(test) != names(train)) #only 1 name different test problem_id  
+```
+
+##Data preprocessing - feature shrinkage  
+- `summary(train)` we see large number of NAs 
+- Keep only those var which have alteast 5% non missing data  
+- remove those var which have constant values as they do no value addition to model  
+
+```{r 2dataprocess1,cache=TRUE,echo=TRUE,warning=FALSE,message=FALSE}  
+var_removed_na <- which(colSums(is.na(train)) < nrow(train)*0.95)
+train1 <- train[,var_removed_na] #remove columns with large NAs
+test1  <- test[,var_removed_na] #replicate step for test data
+
+#Remove variable either constant values
+constants <- apply(train1,2,var,na.rm=TRUE)!=0
+tt1 <- which(!constants)
+train2 <- train1[,-tt1]
+test2 <- test1[,-tt1]  
+```
+
+final dimensions of dataset `train2` `r dim(train2)` `test2` `r dim(test2)`
+
+## Machine Learning Model building  
+
+- Note: due to hardware limitations reduced the Crossvalidation to cv from repeatedcv
+folds from 10 to 3. Used x,y in train function instead of formula method to make it run on existing hardware. Due to which certain data alignments had to be performed.
+
+- Tuning parameters, we do simple cross validation using 3 folds to build the model.
+
+```{r 3model_train,cache=TRUE,echo=TRUE}  
+library(caret)
+
+mtryGrid <- expand.grid(mtry=30)
+fitcrtl <- trainControl(method = "cv",
+                        number=3,
+                        #repeats=3,
+                        classProbs=FALSE)
+
+yvar <- train2$classe
+xdf  <- train2[,-c(60)]
+modfit2 <- train(y = yvar,x=xdf,method = "rf",trControl=fitcrtl,tuneGrid=mtryGrid)
+```
+
+##Model parameters and error rates  
+- 3 fold CrossValidation approach used without repeation.  
+- as noted model accuracy is quite high as well (>99.9%).  
+- Out of sample error for final model is 0.01% which is fairly good.  
+- from confusion matrix we see only two missclassification(very low error rates)  
+
+```{r 4Accuracy}  
+modfit2  
+modfit2$finalModel  
+```  
